@@ -79,7 +79,7 @@ class SchemaGen {
               accum match {
 
                 case right @ Right((accumNodes, accumProcessed)) =>
-                  Option(model.getElementDeclaration(x, "")) match {  //TODO(AR) figure out namespaces!
+                  findElementDeclaration(model, elementDecl, x, "") match {  //TODO(AR) figure out namespaces!
 
                     case Some(ed) =>
                       if(!accumProcessed.contains(ed.getName)) {    //TODO(AR) figure out namespaces!
@@ -101,15 +101,43 @@ class SchemaGen {
               }
             }
 
-          // take 1 contentRefName
-          // get the element decl
-
         case Left(t) => Left(t)
       }
     }
 
     val results = processAll(rootElementDecl)
     results.map(_._1)
+  }
+
+  private def findElementDeclaration(model: XSModel, parent: XSElementDeclaration, name: String, namespace: String) : Option[XSElementDeclaration] = {
+    // first try and find if the element is declared inline
+    val inlineDeclaration : Option[XSElementDeclaration] = Option(parent.getTypeDefinition)
+      .filter(_.isInstanceOf[XSComplexTypeDefinition])
+      .map(_.asInstanceOf[XSComplexTypeDefinition])
+      .flatMap(td => Option(td.getParticle))
+      .flatMap(p => Option(p.getTerm))
+      .filter(t => t.isInstanceOf[XSModelGroup])
+      .map(_.asInstanceOf[XSModelGroup])
+      .flatMap(mg => Option(mg.getParticles))
+      .map(toSeq(_))
+      .getOrElse(Seq.empty)
+      .filter(_.isInstanceOf[XSParticle])
+      .map(_.asInstanceOf[XSParticle])
+      .map(_.getTerm)
+      .filter(_.getType == XSConstants.ELEMENT_DECLARATION)
+      .map(_.asInstanceOf[XSElementDeclaration])
+      .collectFirst { case elem if name.equals(elem.getName) && nsEquals(namespace, elem.getNamespace) => elem }
+
+    // otherwise, if there is no inline declaration, assume a ref and attempt a global element declaration lookup
+    inlineDeclaration
+      .orElse(Option(model.getElementDeclaration(name, namespace)))
+  }
+
+  private def nsEquals(ns1: String, ns2:String) = Option(ns1).getOrElse("").equals(Option(ns2).getOrElse(""))
+
+  private def toSeq(objectList: XSObjectList): Seq[XSObject] = {
+    for(i <- (0 until objectList.getLength))
+      yield objectList.item(i)
   }
 
   private def elementToProseMirrorSchemaNode(model: XSModel, elementDecl: XSElementDeclaration): Either[Throwable, PMSchemaNode] = {
@@ -152,8 +180,7 @@ class SchemaGen {
 
   private def getAttributes(model: XSModel, complexTypeDef: XSComplexTypeDefinition) : Either[Throwable, Seq[PMSchemaNodeAttribute]] = {
     val objectList = complexTypeDef.getAttributeUses
-    val attrs = for(i <- (0 until objectList.getLength))
-      yield objectList.item(i).asInstanceOf[XSAttributeUse]
+    val attrs = toSeq(objectList).map(_.asInstanceOf[XSAttributeUse])
 
     Right(attrs.map { attr =>
       PMSchemaNodeAttribute(attr.getAttrDeclaration.getName, attr.getRequired, Option(attr.getValueConstraintValue).map(_.getNormalizedValue))
@@ -204,8 +231,7 @@ class SchemaGen {
   }
 
   private def processObjectList(model: XSModel, objectList: XSObjectList) : NodeContentResult = {
-    val objects = for(i <- (0 until objectList.getLength))
-      yield objectList.item(i)
+    val objects = toSeq(objectList)
 
     // only evaluate until we get the first error, can use fold to do that
     val emptyAccum : NodeContentResult = Right(Seq.empty[PMSchemaNodeRef])
