@@ -39,6 +39,20 @@ object ProseMirror {
     def asJson: String
   }
 
+  case class PMSchemaNodeAttribute(name: String, required: Boolean, default: Option[String]) extends JsonSerializable {
+    override def asJson: String = {
+      def defaultVal() : String = {
+        if(required) {
+          s""""${default.getOrElse("")}""""
+        } else {
+          default.map(d => s""""${d}"""").getOrElse("undefined")
+        }
+      }
+
+      s"${name}: {default: ${defaultVal()}}"
+    }
+  }
+
   sealed trait PMSchemaNodeContentItem extends JsonSerializable
   case class PMSchemaNodeRef(name: NodeName, cardinality: Cardinalities.Cardinality) extends PMSchemaNodeContentItem {
     override def asJson: String = {
@@ -52,11 +66,7 @@ object ProseMirror {
     }
   }
 
-  case class PMSchemaNode(name: NodeName, content: Seq[PMSchemaNodeContentItem]) {
-    private def asJson(content: Seq[PMSchemaNodeContentItem]): String = {
-      content.map(_.asJson).mkString(" ")  //TODO(AR) mkString concats at the moment
-    }
-
+  case class PMSchemaNode(name: NodeName, attributes: Seq[PMSchemaNodeAttribute], content: Seq[PMSchemaNodeContentItem]) {
     def getContentNodeRefNames(): Seq[String] = {
       def getRefNames(contentItem: PMSchemaNodeContentItem): Seq[String] = {
         contentItem match {
@@ -76,9 +86,20 @@ object ProseMirror {
         .foldLeft(Seq.empty[String]){ (accum, x) => accum ++ x}
     }
 
+    private def contentAsJson(content: Seq[PMSchemaNodeContentItem]): Option[String] = {
+      Option(content.map(_.asJson).mkString(" ")).filterNot(_.isEmpty)  //TODO(AR) mkString concats at the moment
+    }
+
+    private def attrsAsJson(attribute: Seq[PMSchemaNodeAttribute]) : Option[String] = {
+      Option(attributes.map(_.asJson).mkString(", ")).filterNot(_.isEmpty)
+    }
+
     def asJson: String = {
+      val contentStr = contentAsJson(content).map(c => s"""    content: "${c}"""")
+      val attrStr = attrsAsJson(attributes).map(a => s"""    attrs: {${a}}""")
+
       s"""$name: {
-         |    content: "${asJson(content)}"
+         |${Seq(contentStr, attrStr).flatten.mkString(s",${sys.props("line.separator")}")}
          |}""".stripMargin
     }
   }

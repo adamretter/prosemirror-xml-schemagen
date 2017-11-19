@@ -113,13 +113,14 @@ class SchemaGen {
   }
 
   private def elementToProseMirrorSchemaNode(model: XSModel, elementDecl: XSElementDeclaration): Either[Throwable, PMSchemaNode] = {
-    val children = getChildElements(model, elementDecl)
-    children.map(PMSchemaNode(elementDecl.getName, _))
+    val children = getChildren(model, elementDecl)
+    children.map(c => PMSchemaNode(elementDecl.getName, c._1, c._2))
   }
 
-  private type NodeContentResult = Either[Throwable, Seq[PMSchemaNodeContentItem]]
 
-  private def getChildElements(model: XSModel, elementDecl: XSElementDeclaration) : NodeContentResult = {
+  private type NodeChildren = Either[Throwable, (Seq[PMSchemaNodeAttribute], Seq[PMSchemaNodeContentItem])]
+
+  private def getChildren(model: XSModel, elementDecl: XSElementDeclaration) : NodeChildren = {
     val typeDef = elementDecl.getTypeDefinition
     typeDef.getTypeCategory match {
       case XSTypeDefinition.SIMPLE_TYPE =>
@@ -130,18 +131,36 @@ class SchemaGen {
         if(Option(complexType.getName) != Some("anyType")) {
           processType(model, complexType)
         } else {
-          Right(Seq.empty)
+          Right((Seq.empty, Seq.empty))
         }
     }
   }
 
-  private def processType(simpleTypeDef: XSSimpleTypeDefinition) : NodeContentResult = {
-    Right(Seq.empty)
+  private def processType(simpleTypeDef: XSSimpleTypeDefinition) : NodeChildren = {
+    Right((Seq.empty, Seq.empty))
   }
 
-  private def processType(model: XSModel, complexTypeDef: XSComplexTypeDefinition): NodeContentResult = {
-    Option(complexTypeDef.getParticle).map(processParticle(model, _)).getOrElse(Right(Seq.empty))
+  private def processType(model: XSModel, complexTypeDef: XSComplexTypeDefinition): NodeChildren = {
+    val attributes = getAttributes(model, complexTypeDef)
+    attributes.flatMap { attrs =>
+      Option(complexTypeDef.getParticle)
+        .map(processParticle(model, _))
+        .getOrElse(Right(Seq.empty))
+        .map(contentItems => (attrs, contentItems))
+    }
   }
+
+  private def getAttributes(model: XSModel, complexTypeDef: XSComplexTypeDefinition) : Either[Throwable, Seq[PMSchemaNodeAttribute]] = {
+    val objectList = complexTypeDef.getAttributeUses
+    val attrs = for(i <- (0 until objectList.getLength))
+      yield objectList.item(i).asInstanceOf[XSAttributeUse]
+
+    Right(attrs.map { attr =>
+      PMSchemaNodeAttribute(attr.getAttrDeclaration.getName, attr.getRequired, Option(attr.getValueConstraintValue).map(_.getNormalizedValue))
+    })
+  }
+
+  private type NodeContentResult = Either[Throwable, Seq[PMSchemaNodeContentItem]]
 
   private def processParticle(model: XSModel, particle: XSParticle) : NodeContentResult = {
     processTerm(model, particle.getTerm, asCardinality(particle))
