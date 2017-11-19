@@ -288,16 +288,16 @@ class SchemaGen {
           case 1 =>
             Cardinalities.ZERO_OR_ONE
 
-          case -1 =>  //unbounded
+          case _ =>  //unbounded
             Cardinalities.ZERO_OR_MORE
         }
 
-      case 1 =>
+      case _ =>
         obj.getMaxOccurs match {
           case 1 =>
             Cardinalities.ONE
 
-          case -1 =>  //unbounded
+          case _ =>  //unbounded
             Cardinalities.ONE_OR_MORE
         }
     }
