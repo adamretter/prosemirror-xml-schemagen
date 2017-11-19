@@ -24,7 +24,6 @@ import javax.xml.namespace.QName
 
 import cats.effect.IO
 import com.evolvedbinary.prosemirror.xmlschemagen.ProseMirror._
-import com.sun.org.apache.xerces.internal.impl.xs.XSComplexTypeDecl
 import org.apache.xerces.impl.xs.{SchemaGrammar, XMLSchemaLoader}
 import org.apache.xerces.xni.parser.XMLInputSource
 import org.apache.xerces.xs._
@@ -43,14 +42,12 @@ class SchemaGen {
       .map(ParsedSchema)
   }
 
-  type ProseMirrorSchemaResult = Either[Throwable, Seq[PMSchemaNode]]
-
   def toProseMirrorSchema(parsedSchema: ParsedSchema, rootElementName: QName) : ProseMirrorSchemaResult = {
     val model = parsedSchema
       .grammar
       .toXSModel
-    Option(model.getElementDeclaration(rootElementName.getLocalPart, rootElementName.getNamespaceURI)
-    ) match {
+
+    Option(model.getElementDeclaration(rootElementName.getLocalPart, rootElementName.getNamespaceURI)) match {
       case Some(rootElement) =>
         processRootElementDeclaration(model, rootElement)
 
@@ -61,8 +58,8 @@ class SchemaGen {
 
   private def processRootElementDeclaration(model: XSModel, rootElementDecl: XSElementDeclaration) : ProseMirrorSchemaResult = {
 
-    def processAll(elementDecl: XSElementDeclaration, processed: Set[String] = Set.empty) : Either[Throwable, (Seq[PMSchemaNode], Set[String])] = {
-      val nowProcessed = processed + elementDecl.getName  //TODO(AR) figure out namespaces!
+    def processAll(elementDecl: XSElementDeclaration, processed: Set[NodeName] = Set.empty) : Either[Throwable, (Seq[PMSchemaNode], Set[NodeName])] = {
+      val nowProcessed = processed + new QName(elementDecl.getNamespace, elementDecl.getName)
 
 //      println(s"processAll=${elementDecl.getName}")
 
@@ -73,17 +70,17 @@ class SchemaGen {
 //          println(s"    children=${contentRefNames}")
 
 
-          val initAccum : Either[Throwable, (Seq[PMSchemaNode], Set[String])] = Right((Seq(schemaNode), nowProcessed))
+          val initAccum : Either[Throwable, (Seq[PMSchemaNode], Set[NodeName])] = Right((Seq(schemaNode), nowProcessed))
           contentRefNames
             .filterNot(nowProcessed.contains)
             .foldLeft(initAccum) { (accum, x) =>
               accum match {
 
                 case right @ Right((accumNodes, accumProcessed)) =>
-                  findElementDeclaration(model, elementDecl, x, "") match {  //TODO(AR) figure out namespaces!
+                  findElementDeclaration(model, elementDecl, x) match {
 
                     case Some(ed) =>
-                      if(!accumProcessed.contains(ed.getName)) {    //TODO(AR) figure out namespaces!
+                      if(!accumProcessed.contains(new QName(ed.getNamespace, ed.getName))) {
                         processAll(ed, accumProcessed)
                           .map {
                             case (resNodes, resProcessed) =>
@@ -107,7 +104,7 @@ class SchemaGen {
     }
 
     val results = processAll(rootElementDecl)
-    results.map(_._1)
+    results.map(r => PMSchema(r._1))
   }
 
   /**
@@ -147,7 +144,7 @@ class SchemaGen {
 
     // otherwise, if there is no inline declaration, assume a ref and attempt a global element declaration lookup
     inlineDeclaration
-      .orElse(Option(model.getElementDeclaration(name, namespace)))
+      .orElse(Option(model.getElementDeclaration(name.getLocalPart, name.getNamespaceURI)))
   }
 
   private def nsEquals(ns1: String, ns2:String) = Option(ns1).getOrElse("").equals(Option(ns2).getOrElse(""))
@@ -172,7 +169,7 @@ class SchemaGen {
     }
 
     val children = getChildren(model, elementDecl)
-    children.map(c => PMSchemaNode(elementDecl.getName, c._1, c._2, isInline()))
+    children.map(c => PMSchemaNode(new QName(elementDecl.getNamespace, elementDecl.getName), c._1, c._2, isInline()))
   }
 
 
@@ -251,7 +248,7 @@ class SchemaGen {
           Left(new IllegalStateException(s"Cannot find substitutionGroup for abstract element: ${elementDecl.getName}"))
       }
     } else {
-      Right(Seq(PMSchemaNodeRef(elementDecl.getName, cardinality))) //TODO(AR) need to fix the cardinality
+      Right(Seq(PMSchemaNodeRef(new QName(elementDecl.getNamespace, elementDecl.getName), cardinality)))
     }
   }
 

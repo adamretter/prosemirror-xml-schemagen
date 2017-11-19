@@ -21,6 +21,8 @@ import java.net.URL
 import java.nio.file.{Files, Path, Paths}
 import javax.xml.namespace.QName
 
+import com.evolvedbinary.prosemirror.xmlschemagen.ProseMirror.{Namespaces, ProseMirrorSchemaResult}
+
 import scala.util.{Failure, Success, Try}
 
 object CmdLine {
@@ -28,9 +30,6 @@ object CmdLine {
   val EXIT_CODE_INVALID_ARGS = 1
   val EXIT_CODE_SCHEMA_ERROR = 2
 
-  type NsPrefix = String
-  type NsURL = String
-  type Namespaces = Map[NsPrefix, NsURL]
   case class ParsedArgs(schemaFile: Option[Path] = Option.empty, namespaces: Namespaces = Map.empty, rootElement: Option[String] = Option.empty)
 
   def isValidPrefix(prefix: String) = !prefix.contains(":")
@@ -77,7 +76,7 @@ object CmdLine {
       case Some(parsedArgs) =>
         val schemaGen = new SchemaGen()
 
-        val schemaNodes = schemaGen
+        val pmSchema: ProseMirrorSchemaResult = schemaGen
           .parse(parsedArgs.schemaFile.get)
           .flatMap { parsedSchema =>
             toQName(parsedArgs.rootElement.get, parsedArgs.namespaces).flatMap { rootElementName =>
@@ -85,10 +84,10 @@ object CmdLine {
             }
           }
 
-        schemaNodes match {
-          case Right(sn) =>
-            for(s <- sn)
-              println(s.asJson)
+        pmSchema match {
+          case Right(pms) =>
+            val prefixes = parsedArgs.namespaces.map(_.swap)
+            println(pms.asJson(prefixes))
 
           case Left(t) =>
             t.printStackTrace()
@@ -109,7 +108,7 @@ object CmdLine {
       val nsPrefix = parts(0)
       namespaces.get(nsPrefix) match {
         case Some(nsUrl) =>
-          Try(new QName(nsUrl, nsPrefix)).toEither
+          Try(new QName(nsUrl, parts(1), nsPrefix)).toEither
 
         case None =>
           Left(new IllegalArgumentException(s"No namespace defined for prefix: $nsPrefix"))

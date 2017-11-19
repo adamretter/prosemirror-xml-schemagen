@@ -17,9 +17,27 @@
 
 package com.evolvedbinary.prosemirror.xmlschemagen
 
+import javax.xml.namespace.QName
+
 object ProseMirror {
 
-  type NodeName = String
+  type NodeName = QName
+  type NsPrefix = String
+  type NsURL = String
+  type Namespaces = Map[NsPrefix, NsURL]
+  type Prefixes = Map[NsURL, NsPrefix]
+
+  type ProseMirrorSchemaResult = Either[Throwable, PMSchema]
+
+  val EOL = sys.props("line.separator")
+
+  def qnameToJsonName(prefixes: Prefixes, name: QName) : String = {
+    Option(name.getNamespaceURI)
+      .filter(_.nonEmpty)
+      .flatMap(prefixes.get(_))
+      .map(prefix => s"$prefix:")
+      .getOrElse("") + name.getLocalPart
+  }
 
   object Cardinalities {
     sealed abstract class Cardinality(val symbol: String)
@@ -36,11 +54,11 @@ object ProseMirror {
   }
 
   sealed trait JsonSerializable {
-    def asJson: String
+    def asJson(prefixes: Prefixes): String
   }
 
   case class PMSchemaNodeAttribute(name: String, required: Boolean, default: Option[String]) extends JsonSerializable {
-    override def asJson: String = {
+    override def asJson(prefixes: Prefixes): String = {
       def defaultVal() : String = {
         if(required) {
           s""""${default.getOrElse("")}""""
@@ -55,20 +73,20 @@ object ProseMirror {
 
   sealed trait PMSchemaNodeContentItem extends JsonSerializable
   case class PMSchemaNodeRef(name: NodeName, cardinality: Cardinalities.Cardinality) extends PMSchemaNodeContentItem {
-    override def asJson: String = {
-      s"${name}${cardinality.symbol}"
+    override def asJson(prefixes: Prefixes): String = {
+      s"${qnameToJsonName(prefixes, name)}${cardinality.symbol}"
     }
   }
 
   case class PMSchemaNodeRefGroup(group: Seq[PMSchemaNodeContentItem], compositor: Compositors.Compositor, cardinality: Cardinalities.Cardinality) extends PMSchemaNodeContentItem {
-    override def asJson: String = {
-      s"(${group.map(_.asJson).mkString(compositor.separator)})${cardinality.symbol}"
+    override def asJson(prefixes: Prefixes): String = {
+      s"(${group.map(_.asJson(prefixes)).mkString(compositor.separator)})${cardinality.symbol}"
     }
   }
 
   case class PMSchemaNode(name: NodeName, attributes: Seq[PMSchemaNodeAttribute], content: Seq[PMSchemaNodeContentItem], inline: Boolean) {
-    def getContentNodeRefNames(): Seq[String] = {
-      def getRefNames(contentItem: PMSchemaNodeContentItem): Seq[String] = {
+    def getContentNodeRefNames(): Seq[NodeName] = {
+      def getRefNames(contentItem: PMSchemaNodeContentItem): Seq[NodeName] = {
         contentItem match {
           case PMSchemaNodeRef(name, _) =>
             Seq(name)
@@ -83,31 +101,39 @@ object ProseMirror {
       content
         .map(getRefNames)
         .filterNot(_.isEmpty)
-        .foldLeft(Seq.empty[String]){ (accum, x) => accum ++ x}
+        .foldLeft(Seq.empty[NodeName]){ (accum, x) => accum ++ x}
     }
 
-    private def contentAsJson(content: Seq[PMSchemaNodeContentItem]): Option[String] = {
-      Option(content.map(_.asJson).mkString(" ")).filterNot(_.isEmpty)  //TODO(AR) mkString concats at the moment
+    private def contentAsJson(prefixes: Prefixes, content: Seq[PMSchemaNodeContentItem]): Option[String] = {
+      Option(content.map(_.asJson(prefixes)).mkString(" ")).filterNot(_.isEmpty)  //TODO(AR) mkString concats at the moment
     }
 
-    private def attrsAsJson(attribute: Seq[PMSchemaNodeAttribute]) : Option[String] = {
-      Option(attributes.map(_.asJson).mkString(", ")).filterNot(_.isEmpty)
+    private def attrsAsJson(prefixes: Prefixes, attribute: Seq[PMSchemaNodeAttribute]) : Option[String] = {
+      Option(attributes.map(_.asJson(prefixes)).mkString(", ")).filterNot(_.isEmpty)
     }
 
     private def inlineAsJson(inline: Boolean): Option[String] = {
       if(inline) {
-        Some("    inline: true")
+        Some("        inline: true")
       } else {
         None
       }
     }
 
-    def asJson: String = {
-      val contentStr = contentAsJson(content).map(c => s"""    content: "${c}"""")
-      val attrStr = attrsAsJson(attributes).map(a => s"""    attrs: {${a}}""")
+    def asJson(prefixes: Prefixes): String = {
+      val contentStr = contentAsJson(prefixes, content).map(c => s"""        content: "${c}"""")
+      val attrStr = attrsAsJson(prefixes, attributes).map(a => s"""        attrs: {${a}}""")
 
-      s"""$name: {
-         |${Seq(contentStr, attrStr, inlineAsJson(inline)).flatten.mkString(s",${sys.props("line.separator")}")}
+      s"""    "${qnameToJsonName(prefixes, name)}": {
+         |${Seq(contentStr, attrStr, inlineAsJson(inline)).flatten.mkString(s",$EOL")}
+         |    }""".stripMargin
+    }
+  }
+
+  case class PMSchema(nodes: Seq[PMSchemaNode]) extends JsonSerializable {
+    def asJson(prefixes: Prefixes): String = {
+      s"""nodes: {
+         |${nodes.map(_.asJson(prefixes)).mkString(s",$EOL$EOL")}
          |}""".stripMargin
     }
   }
