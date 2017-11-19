@@ -66,7 +66,7 @@ object ProseMirror {
     }
   }
 
-  case class PMSchemaNode(name: NodeName, attributes: Seq[PMSchemaNodeAttribute], content: Seq[PMSchemaNodeContentItem]) {
+  case class PMSchemaNode(name: NodeName, attributes: Seq[PMSchemaNodeAttribute], content: Seq[PMSchemaNodeContentItem], inline: Boolean) {
     def getContentNodeRefNames(): Seq[String] = {
       def getRefNames(contentItem: PMSchemaNodeContentItem): Seq[String] = {
         contentItem match {
@@ -94,12 +94,20 @@ object ProseMirror {
       Option(attributes.map(_.asJson).mkString(", ")).filterNot(_.isEmpty)
     }
 
+    private def inlineAsJson(inline: Boolean): Option[String] = {
+      if(inline) {
+        Some("    inline: true")
+      } else {
+        None
+      }
+    }
+
     def asJson: String = {
       val contentStr = contentAsJson(content).map(c => s"""    content: "${c}"""")
       val attrStr = attrsAsJson(attributes).map(a => s"""    attrs: {${a}}""")
 
       s"""$name: {
-         |${Seq(contentStr, attrStr).flatten.mkString(s",${sys.props("line.separator")}")}
+         |${Seq(contentStr, attrStr, inlineAsJson(inline)).flatten.mkString(s",${sys.props("line.separator")}")}
          |}""".stripMargin
     }
   }

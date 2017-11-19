@@ -24,6 +24,7 @@ import javax.xml.namespace.QName
 
 import cats.effect.IO
 import com.evolvedbinary.prosemirror.xmlschemagen.ProseMirror._
+import com.sun.org.apache.xerces.internal.impl.xs.XSComplexTypeDecl
 import org.apache.xerces.impl.xs.{SchemaGrammar, XMLSchemaLoader}
 import org.apache.xerces.xni.parser.XMLInputSource
 import org.apache.xerces.xs._
@@ -141,8 +142,21 @@ class SchemaGen {
   }
 
   private def elementToProseMirrorSchemaNode(model: XSModel, elementDecl: XSElementDeclaration): Either[Throwable, PMSchemaNode] = {
+    def isInline(): Boolean = {
+      def isMixedContent(complexType: XSComplexTypeDefinition) = complexType.getContentType == XSComplexTypeDefinition.CONTENTTYPE_MIXED
+      def isSimpleContentType(complexType: XSComplexTypeDefinition) = complexType.getContentType == XSComplexTypeDefinition.CONTENTTYPE_SIMPLE
+
+      val typeDef = elementDecl.getTypeDefinition
+      if(typeDef.isInstanceOf[XSSimpleTypeDefinition]) {
+        true
+      } else {
+        val complexType = typeDef.asInstanceOf[XSComplexTypeDefinition]
+        isMixedContent(complexType) || isSimpleContentType(complexType)
+      }
+    }
+
     val children = getChildren(model, elementDecl)
-    children.map(c => PMSchemaNode(elementDecl.getName, c._1, c._2))
+    children.map(c => PMSchemaNode(elementDecl.getName, c._1, c._2, isInline()))
   }
 
 
