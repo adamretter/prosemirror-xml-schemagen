@@ -110,24 +110,40 @@ class SchemaGen {
     results.map(_._1)
   }
 
-  private def findElementDeclaration(model: XSModel, parent: XSElementDeclaration, name: String, namespace: String) : Option[XSElementDeclaration] = {
+  /**
+    * Recursively descends through a group to extract all element declarations
+    */
+  private def getElementDecls(group: XSModelGroup) : Seq[XSElementDeclaration] = {
+    Option(group.getParticles)
+        .map(toSeq(_))
+        .getOrElse(Seq.empty)
+        .filter(_.isInstanceOf[XSParticle])
+        .map(_.asInstanceOf[XSParticle])
+        .map(_.getTerm)
+        .map {
+            case e if e.getType == XSConstants.ELEMENT_DECLARATION =>
+              Seq(e.asInstanceOf[XSElementDeclaration])
+
+            case g if (g.getType == XSConstants.MODEL_GROUP) =>
+              getElementDecls(g.asInstanceOf[XSModelGroup])
+
+            case _ =>
+              Seq.empty
+        }.flatten
+  }
+
+  private def findElementDeclaration(model: XSModel, parent: XSElementDeclaration, name: NodeName) : Option[XSElementDeclaration] = {
     // first try and find if the element is declared inline
-    val inlineDeclaration : Option[XSElementDeclaration] = Option(parent.getTypeDefinition)
-      .filter(_.isInstanceOf[XSComplexTypeDefinition])
-      .map(_.asInstanceOf[XSComplexTypeDefinition])
-      .flatMap(td => Option(td.getParticle))
-      .flatMap(p => Option(p.getTerm))
-      .filter(t => t.isInstanceOf[XSModelGroup])
-      .map(_.asInstanceOf[XSModelGroup])
-      .flatMap(mg => Option(mg.getParticles))
-      .map(toSeq(_))
-      .getOrElse(Seq.empty)
-      .filter(_.isInstanceOf[XSParticle])
-      .map(_.asInstanceOf[XSParticle])
-      .map(_.getTerm)
-      .filter(_.getType == XSConstants.ELEMENT_DECLARATION)
-      .map(_.asInstanceOf[XSElementDeclaration])
-      .collectFirst { case elem if name.equals(elem.getName) && nsEquals(namespace, elem.getNamespace) => elem }
+    val inlineDeclaration: Option[XSElementDeclaration] = Option(parent.getTypeDefinition)
+          .filter(_.isInstanceOf[XSComplexTypeDefinition])
+          .map(_.asInstanceOf[XSComplexTypeDefinition])
+          .flatMap(td => Option(td.getParticle))
+          .flatMap(p => Option(p.getTerm))
+          .filter(t => t.isInstanceOf[XSModelGroup])
+          .map(_.asInstanceOf[XSModelGroup])
+          .map(getElementDecls(_))
+          .getOrElse(Seq.empty)
+          .collectFirst { case elem if name.getLocalPart.equals(elem.getName) && nsEquals(name.getNamespaceURI, elem.getNamespace) => elem }
 
     // otherwise, if there is no inline declaration, assume a ref and attempt a global element declaration lookup
     inlineDeclaration
